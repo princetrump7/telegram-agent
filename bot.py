@@ -300,10 +300,22 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             text = text[:MAX_CHARS] + "\n\n[...content truncated at 10,000 chars]"
 
         conv = memory.get_or_create(chat_id)
+
+        # Build a clear prompt for the model
+        file_ext = Path(document.file_name or "file").suffix.lower() if document.file_name else ""
+        if file_ext in (".pdf", ".txt", ".md"):
+            file_type_prompt = "Read this document and provide a clear summary of its contents. Highlight the key points, main topics, and important details."
+        elif file_ext in (".csv", ".json", ".xml", ".yaml", ".yml"):
+            file_type_prompt = "Read this data file and summarize its structure and contents. Describe what data it contains, the schema/structure, and any notable patterns."
+        elif file_ext in (".py", ".js", ".ts", ".html", ".css"):
+            file_type_prompt = "Read this code file and provide a brief analysis: what it does, its structure, and any notable patterns or potential issues."
+        else:
+            file_type_prompt = "Read this file and provide a clear summary of its contents."
+
         conv.add_message(
             "user",
             f"File received: {document.file_name or 'unnamed'}\n\n"
-            f"File content:\n```\n{text}\n```\n\nPlease analyze this file.",
+            f"File content:\n```\n{text}\n```\n\n{file_type_prompt}",
         )
 
         # Start typing indicator

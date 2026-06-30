@@ -71,17 +71,27 @@ def send_message(conversation: Conversation) -> Tuple[str, int, int]:
     )
 
     choice = response.choices[0]
-    response_text = choice.message.content.strip()
+    raw_content = choice.message.content
+    response_text = (raw_content or "").strip()
 
     usage = response.usage
     input_tokens = usage.prompt_tokens if usage else total_input
     output_tokens = usage.completion_tokens if usage else _estimate_tokens(response_text)
 
     logger.info(
-        "OpenCode Zen responded | input_tokens=%d | output_tokens=%d | text_length=%d",
+        "OpenCode Zen responded | input_tokens=%d | output_tokens=%d | text_length=%d | raw_content=%r",
         input_tokens,
         output_tokens,
         len(response_text),
+        raw_content is not None,
     )
+
+    if not response_text and choice.finish_reason:
+        logger.warning(
+            "Empty content from model. finish_reason=%s, reasoning=%r",
+            choice.finish_reason,
+            getattr(choice.message, "reasoning_content", None),
+        )
+        response_text = "I received your file but had trouble generating a response. Could you try sending it again or ask a specific question about it?"
 
     return response_text, input_tokens, output_tokens
