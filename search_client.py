@@ -12,6 +12,15 @@ logger = logging.getLogger(__name__)
 
 MAX_RESULTS = 5
 
+_RE_TAG = __import__("re").compile(r"<[^>]+>|&nbsp;")
+
+
+def _clean_html(text: str) -> str:
+    """Strip HTML tags and unescape entities."""
+    text = _RE_TAG.sub(" ", text)
+    text = html_mod.unescape(text)
+    return " ".join(text.split())  # collapse whitespace
+
 
 class SearchResult:
     def __init__(self, title: str, url: str, snippet: str) -> None:
@@ -67,10 +76,10 @@ async def _try_duckduckgo_api(query: str, max_results: int) -> List[SearchResult
         results: List[SearchResult] = []
 
         # Abstract (featured snippet / infobox)
-        abstract = data.get("AbstractText", "")
+        abstract = _clean_html(data.get("AbstractText", ""))
         if abstract and data.get("AbstractURL"):
             results.append(SearchResult(
-                title=data.get("Heading", "Summary"),
+                title=_clean_html(data.get("Heading", "Summary")),
                 url=data["AbstractURL"],
                 snippet=abstract[:300],
             ))
@@ -80,10 +89,11 @@ async def _try_duckduckgo_api(query: str, max_results: int) -> List[SearchResult
             if len(results) >= max_results:
                 break
             if "Text" in topic and "FirstURL" in topic:
+                text = _clean_html(topic.get("Text", ""))
                 results.append(SearchResult(
-                    title=topic.get("Text", "").split(" - ")[0][:150],
+                    title=text.split(" - ")[0][:150],
                     url=topic["FirstURL"],
-                    snippet=topic.get("Text", "")[:300],
+                    snippet=text[:300],
                 ))
             # Nested topics
             if "Topics" in topic:
@@ -91,10 +101,11 @@ async def _try_duckduckgo_api(query: str, max_results: int) -> List[SearchResult
                     if len(results) >= max_results:
                         break
                     if "Text" in subtopic and "FirstURL" in subtopic:
+                        text = _clean_html(subtopic.get("Text", ""))
                         results.append(SearchResult(
-                            title=subtopic.get("Text", "").split(" - ")[0][:150],
+                            title=text.split(" - ")[0][:150],
                             url=subtopic["FirstURL"],
-                            snippet=subtopic.get("Text", "")[:300],
+                            snippet=text[:300],
                         ))
 
         # Results from the HTML scrape endpoint (more web results)
@@ -150,21 +161,21 @@ def _scrape_duckduckgo_html(query: str, max_results: int) -> List[SearchResult]:
             url = urllib.parse.unquote(url)
 
             # Extract title
-            title = ""
+            title = _clean_html("")
             if 'result__a' in block:
                 t_start = block.find('>', block.find('result__a')) + 1
                 t_end = block.find('</a>', t_start)
                 if t_end > t_start:
-                    title = html_mod.unescape(block[t_start:t_end].strip())
+                    title = _clean_html(block[t_start:t_end])
 
             # Extract snippet
-            snippet = ""
+            snippet = _clean_html("")
             for marker in ('result__snippet', 'snippet'):
                 if marker in block:
                     s_start = block.find('>', block.find(marker)) + 1
                     s_end = block.find('</', s_start)
                     if s_end > s_start:
-                        snippet = html_mod.unescape(block[s_start:s_end].strip())
+                        snippet = _clean_html(block[s_start:s_end])
                         break
 
             if title or snippet:
@@ -209,12 +220,12 @@ async def _try_wikipedia(query: str, max_results: int) -> List[SearchResult]:
 
         results: List[SearchResult] = []
         for item in data.get("query", {}).get("search", []):
-            title = item.get("titlesnippet", item.get("title", ""))
-            snippet = html_mod.unescape(item.get("snippet", ""))
             page_title = item.get("title", "")
+            title = _clean_html(item.get("titlesnippet", page_title))
+            snippet = _clean_html(item.get("snippet", ""))
             url = f"https://en.wikipedia.org/wiki/{urllib.parse.quote(page_title.replace(' ', '_'))}"
             results.append(SearchResult(
-                title=html_mod.unescape(title)[:150],
+                title=title[:150],
                 url=url,
                 snippet=snippet[:300],
             ))
