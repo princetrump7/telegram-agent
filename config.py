@@ -44,6 +44,7 @@ class Config:
     WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "")
     WEBHOOK_PORT: int = int(os.getenv("PORT", os.getenv("WEBHOOK_PORT", "8080")))
     WEBHOOK_HOST: str = os.getenv("WEBHOOK_HOST", "0.0.0.0")
+    RENDER_EXTERNAL_URL: str = os.getenv("RENDER_EXTERNAL_URL", "")
 
     # --- Rate limiting ---
     RATE_LIMIT_SECONDS: float = float(os.getenv("RATE_LIMIT_SECONDS", "1.0"))
@@ -54,7 +55,16 @@ class Config:
     # --- Derived ---
     @property
     def is_webhook_mode(self) -> bool:
-        return bool(self.WEBHOOK_URL)
+        return bool(self.WEBHOOK_URL or self.RENDER_EXTERNAL_URL)
+
+    @property
+    def resolved_webhook_url(self) -> str:
+        """Return the effective webhook URL, auto-detecting from Render if needed."""
+        if self.WEBHOOK_URL:
+            return self.WEBHOOK_URL
+        if self.RENDER_EXTERNAL_URL:
+            return self.RENDER_EXTERNAL_URL
+        return ""
 
     @property
     def is_configured(self) -> bool:

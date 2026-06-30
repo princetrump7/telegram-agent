@@ -18,7 +18,7 @@ _application = build_application()
 async def _init_webhook() -> None:
     """Start the PTB application and register the webhook."""
     await _application.initialize()
-    webhook_url = config.WEBHOOK_URL.rstrip("/") + "/webhook"
+    webhook_url = config.resolved_webhook_url.rstrip("/") + "/webhook"
     await _application.bot.set_webhook(url=webhook_url)
     logger.info("Webhook registered: %s", webhook_url)
     await _application.start()
