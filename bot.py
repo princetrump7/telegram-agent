@@ -238,16 +238,24 @@ async def web_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"[Web search results for: {query}]\n\n{formatted}",
         )
 
+        # Build result list, keeping total under 4096 chars to avoid Telegram's limit
+        MAX_MSG_LEN = 3800  # leave room for HTML tags and framing
         text = f"📄 <b>Results for:</b> {_safe_html(query)}\n\n"
         if not results:
             text += "No results found. Try a different search."
         else:
             for i, r in enumerate(results[:5], 1):
-                text += (
-                    f"<b>{i}.</b> {_safe_html(r.title)}\n"
-                    f"{_safe_html(r.snippet[:200])}\n"
-                    f"<code>{_safe_html(r.url[:60])}</code>\n\n"
+                snippet = _safe_html(r.snippet[:200])
+                url = _safe_html(r.url[:80])
+                entry = (
+                    f"<b>{i}.</b> {_safe_html(r.title[:150])}\n"
+                    f"{snippet}\n"
+                    f"<code>{url}</code>\n\n"
                 )
+                if len(text) + len(entry) > MAX_MSG_LEN:
+                    text += "… <i>(more results truncated)</i>"
+                    break
+                text += entry
 
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
