@@ -66,6 +66,21 @@ async def health() -> dict:
     }
 
 
+@app.get("/debug-search")
+async def debug_search(q: str = "latest AI news") -> dict:
+    """Test search backends (diagnostic)."""
+    from search_client import search_web, format_search_results
+    results = await search_web(q)
+    return {
+        "query": q,
+        "count": len(results),
+        "results": [
+            {"title": r.title, "url": r.url, "snippet": r.snippet[:100]}
+            for r in results
+        ],
+    }
+
+
 def run() -> None:
     """Run the FastAPI webhook server."""
     logger.info(
