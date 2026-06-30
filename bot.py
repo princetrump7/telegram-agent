@@ -4,6 +4,7 @@ import asyncio
 import html as html_module
 import logging
 import time
+from pathlib import Path
 from typing import Awaitable, Callable, TypeVar
 
 from telegram import Update
@@ -18,7 +19,14 @@ from telegram.ext import (
 
 from ai_client import send_message as ai_send
 from config import config
+from file_handler import (
+    clean_temp_file,
+    download_file,
+    extract_text_from_file,
+    get_file_description,
+)
 from memory import Conversation, memory
+from search_client import format_search_results, search_web
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +129,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "• <code>/help</code> — show available commands\n"
         "• <code>/clear</code> — reset our conversation\n"
         "• <code>/stats</code> — show token usage\n"
-        "• <code>/new</code> — start a fresh conversation\n\n"
+        "• <code>/new</code> — start a fresh conversation\n"
+        "• <code>/web &lt;query&gt;</code> — search the web\n\n"
+        "<b>New features:</b>\n"
+        "📎 Send me a PDF or text file — I'll read and analyze it\n"
+        "🌐 Use <code>/web</code> to get current info from the internet\n\n"
         f"<i>Conversation history: {conv.message_count} messages so far</i>"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
@@ -135,10 +147,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "🔹 <code>/help</code> — This message\n"
         "🔹 <code>/clear</code> — Wipe conversation history for this chat\n"
         "🔹 <code>/stats</code> — Show how many tokens we've used\n"
-        "🔹 <code>/new</code> — Start a completely fresh conversation\n\n"
+        "🔹 <code>/new</code> — Start a completely fresh conversation\n"
+        "🔹 <code>/web &lt;query&gt;</code> — Search the web and get AI help\n"
+        "🔹 <code>/search &lt;query&gt;</code> — Same as /web\n\n"
         "<b>Tips:</b>\n"
         "• I remember our conversation and refer back to it\n"
+        "• You can send me PDFs, text files, code — I'll read and analyze them\n"
         "• Use <code>/clear</code> or <code>/new</code> to reset my memory\n"
+        "• Use <code>/web</code> to get current information from the internet\n"
         "• Long responses are split into multiple messages automatically"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
@@ -191,7 +207,155 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 # ---------------------------------------------------------------------------
-# Message handler — the core Claude interaction
+# Web search command
+# ---------------------------------------------------------------------------
+async def web_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Search the web and return AI-summarized results."""
+    chat_id = update.effective_chat.id
+    query = " ".join(context.args) if context.args else ""
+
+    if not query:
+        await update.message.reply_text(
+            "Usage: <code>/web &lt;your search query&gt;</code>\n"
+            "Example: <code>/web latest AI news 2026</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    await update.message.reply_text(
+        f"🔍 Searching for: <i>{_safe_html(query)}</i>",
+        parse_mode=ParseMode.HTML,
+    )
+
+    try:
+        results = await search_web(query)
+        formatted = format_search_results(results, query)
+
+        conv = memory.get_or_create(chat_id)
+        conv.add_message("user", f"Web search requested: {query}")
+        conv.add_message(
+            "assistant",
+            f"[Web search results for: {query}]\n\n{formatted}",
+        )
+
+        text = f"📄 <b>Results for:</b> {_safe_html(query)}\n\n"
+        if not results:
+            text += "No results found. Try a different search."
+        else:
+            for i, r in enumerate(results[:5], 1):
+                text += (
+                    f"<b>{i}.</b> {_safe_html(r.title)}\n"
+                    f"{_safe_html(r.snippet[:200])}\n"
+                    f"<code>{_safe_html(r.url[:60])}</code>\n\n"
+                )
+
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+        logger.info("Web search for chat %s: %s | %d results", chat_id, query, len(results))
+
+    except Exception as e:
+        logger.exception("Web search failed for chat %s: %s", chat_id, e)
+        await update.message.reply_text(
+            f"❌ Search failed: {_safe_html(str(e)[:200])}",
+            parse_mode=ParseMode.HTML,
+        )
+
+
+# ---------------------------------------------------------------------------
+# File / document handlers
+# ---------------------------------------------------------------------------
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Process a document file (PDF, TXT, etc.)."""
+    chat_id = update.effective_chat.id
+    document = update.message.document
+
+    desc = get_file_description(document)
+    await update.message.reply_text(
+        f"📎 Received: <i>{_safe_html(desc)}</i>\n⏳ Processing...",
+        parse_mode=ParseMode.HTML,
+    )
+
+    local_path = await download_file(
+        context.application.bot,
+        await document.get_file(),
+        suffix=Path(document.file_name or "file").suffix or ".tmp",
+    )
+
+    if not local_path:
+        await update.message.reply_text("❌ Could not download file (too large or error).")
+        return
+
+    try:
+        text = extract_text_from_file(local_path)
+
+        if not text:
+            await update.message.reply_text(
+                "📄 File received. I can only analyze text-based files "
+                "(.txt, .pdf, .csv, .json, .py, etc.).",
+            )
+            return
+
+        MAX_CHARS = 10000
+        if len(text) > MAX_CHARS:
+            text = text[:MAX_CHARS] + "\n\n[...content truncated at 10,000 chars]"
+
+        conv = memory.get_or_create(chat_id)
+        conv.add_message(
+            "user",
+            f"File received: {document.file_name or 'unnamed'}\n\n"
+            f"File content:\n```\n{text}\n```\n\nPlease analyze this file.",
+        )
+
+        # Start typing indicator
+        typing_task = await _typing_indicator(chat_id, context.application)
+
+        try:
+            response_text, in_tok, out_tok = await asyncio.to_thread(ai_send, conv)
+            conv.add_tokens(in_tok, out_tok)
+            conv.add_message("assistant", response_text)
+            await _send_long_message(update, response_text, chat_id)
+
+            logger.info(
+                "File chat %s | %s | %d+%d tokens",
+                chat_id,
+                document.file_name,
+                in_tok,
+                out_tok,
+            )
+        finally:
+            if typing_task:
+                typing_task.cancel()
+
+    except Exception as e:
+        logger.exception("File processing error for chat %s: %s", chat_id, e)
+        await update.message.reply_text(
+            "❌ Error processing file. Please try again.",
+            parse_mode=ParseMode.HTML,
+        )
+    finally:
+        clean_temp_file(local_path)
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Acknowledge a photo message (vision analysis not available with current model)."""
+    chat_id = update.effective_chat.id
+    caption = update.message.caption or ""
+    photo = update.message.photo[-1]  # Largest size
+
+    conv = memory.get_or_create(chat_id)
+
+    text = f"📷 User sent a photo"
+    if caption:
+        text += f" with caption: {caption}"
+    text += "\n\n(I don't have vision capabilities with the current AI model. Please describe what you'd like help with in text.)"
+
+    conv.add_message("user", text)
+    conv.add_message("assistant", "I see you shared a photo. Unfortunately, my current model can't analyze images — but feel free to describe it or tell me what you need!")
+
+    await update.message.reply_text(
+        "📷 Photo received! Unfortunately, the current AI model can't analyze images. "
+        "Describe what's in it and I'll help.",
+    )
 # ---------------------------------------------------------------------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Process a user text message through Claude."""
@@ -272,9 +436,15 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("new", new_command))
+    app.add_handler(CommandHandler("web", web_search))
+    app.add_handler(CommandHandler("search", web_search))
 
     # Message handler (text only)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # File / document handlers
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     # Error handler
     app.add_error_handler(error_handler)
