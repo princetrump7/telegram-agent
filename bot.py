@@ -18,6 +18,7 @@ from telegram.ext import (
 
 from ai_client import send_message as ai_send, send_message_with_search_check
 from config import config
+from image_client import generate_image
 from memory import memory
 from search_client import format_search_results, search_web
 
@@ -56,26 +57,18 @@ async def _send_long_message(
     text: str,
     chat_id: int,
 ) -> None:
-    """
-    Send a long message, splitting into chunks of ~4000 chars.
-
-    Uses HTML parsing only on the first chunk (which is the real response).
-    Subsequent chunks are sent as plain text to avoid parse errors from
-    broken HTML across the split.
-    """
-    MAX_LEN = 4000  # leave room below Telegram's 4096 limit
+    """Send a long message, splitting into chunks of ~4000 chars."""
+    MAX_LEN = 4000
 
     if not text:
         text = "*(empty response)*"
 
-    # First chunk — HTML parsed
     chunk = text[:MAX_LEN]
     await update.message.reply_text(
         _safe_html(chunk),
         parse_mode=ParseMode.HTML,
     )
 
-    # Remaining chunks — plain text (HTML may be split mid-tag)
     pos = MAX_LEN
     while pos < len(text):
         chunk = text[pos : pos + MAX_LEN]
@@ -97,12 +90,11 @@ async def _typing_indicator(chat_id: int, app: Application) -> None:
                     )
                 except Exception:
                     pass
-                await asyncio.sleep(4.5)  # Telegram typing expires after ~5s
+                await asyncio.sleep(4.5)
 
         task = asyncio.create_task(_poke())
         return task
     except Exception:
-        # Best-effort
         pass
 
 
@@ -115,16 +107,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     conv = memory.get_or_create(chat_id)
 
     text = (
-        "👋 <b>Hey there! I'm your AI assistant.</b>\n\n"
-        "I'm running directly inside Telegram — just send me a message and I'll respond.\n\n"
+        "👋 <b>Hey! I'm your personal AI agent.</b>\n\n"
+        "I turn conversations into action. Memory, generation, search — all inside Telegram.\n\n"
         "<b>Commands:</b>\n"
         "• <code>/start</code> — this message\n"
         "• <code>/help</code> — show available commands\n"
+        "• <code>/draw &lt;prompt&gt;</code> — generate an image\n"
+        "• <code>/generate &lt;prompt&gt;</code> — same as /draw\n"
+        "• <code>/note &lt;text&gt;</code> — save a note/reminder\n"
+        "• <code>/notes</code> — list your notes\n"
+        "• <code>/done &lt;id&gt;</code> — mark a note complete\n"
+        "• <code>/web &lt;query&gt;</code> — search the web\n"
         "• <code>/clear</code> — reset our conversation\n"
         "• <code>/stats</code> — show token usage\n"
-        "• <code>/new</code> — start a fresh conversation\n"
-        "• <code>/web &lt;query&gt;</code> — search the web\n\n"
-        f"<i>Conversation history: {conv.message_count} messages so far</i>"
+        "• <code>/new</code> — start a fresh conversation\n\n"
+        "<i>I remember everything across chats. Just talk to me naturally.</i>"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
@@ -135,16 +132,23 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "<b>Available Commands</b>\n\n"
         "🔹 <code>/start</code> — Welcome & intro\n"
         "🔹 <code>/help</code> — This message\n"
-        "🔹 <code>/clear</code> — Wipe conversation history for this chat\n"
-        "🔹 <code>/stats</code> — Show how many tokens we've used\n"
-        "🔹 <code>/new</code> — Start a completely fresh conversation\n"
-        "🔹 <code>/web &lt;query&gt;</code> — Search the web and get AI help\n"
+        "🔹 <code>/draw &lt;prompt&gt;</code> — Generate an AI image\n"
+        "🔹 <code>/generate &lt;prompt&gt;</code> — Same as /draw\n"
+        "🔹 <code>/note &lt;text&gt;</code> — Save a note or reminder\n"
+        "🔹 <code>/notes</code> — List your saved notes\n"
+        "🔹 <code>/done &lt;id&gt;</code> — Mark a note as completed\n"
+        "🔹 <code>/clear</code> — Wipe conversation history\n"
+        "🔹 <code>/stats</code> — Show token usage\n"
+        "🔹 <code>/new</code> — Start completely fresh\n"
+        "🔹 <code>/web &lt;query&gt;</code> — Search the web\n"
         "🔹 <code>/search &lt;query&gt;</code> — Same as /web\n\n"
         "<b>Tips:</b>\n"
-        "• I remember our conversation and refer back to it\n"
-        "• Use <code>/clear</code> or <code>/new</code> to reset my memory\n"
+        "• I remember our conversation and refer back to it — even across different chats!\n"
+        "• Use <code>/draw</code> to generate images from text\n"
+        "• Use <code>/note</code> to save quick reminders\n"
         "• Use <code>/web</code> to get current information from the internet\n"
-        "• Long responses are split into multiple messages automatically"
+        "• I automatically search the web when I need current info\n"
+        "• In groups, mention me or reply to my message to get my attention"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
@@ -196,6 +200,140 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 # ---------------------------------------------------------------------------
+# Image generation
+# ---------------------------------------------------------------------------
+async def draw(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Generate an image from a text prompt."""
+    chat_id = update.effective_chat.id
+    prompt = " ".join(context.args) if context.args else ""
+
+    if not prompt:
+        await update.message.reply_text(
+            "Usage: <code>/draw &lt;description&gt;</code>\n"
+            "Example: <code>/draw a cyberpunk cat riding a neon motorcycle</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    msg = await update.message.reply_text(
+        f"🎨 Generating: <i>{_safe_html(prompt[:300])}</i>",
+        parse_mode=ParseMode.HTML,
+    )
+
+    try:
+        image_bytes = await asyncio.to_thread(generate_image, prompt)
+
+        conv = memory.get_or_create(chat_id)
+        conv.add_message("user", f"[Image generation request] {prompt}")
+        conv.add_message("assistant", "[Generated an image based on your prompt]")
+
+        await update.message.reply_photo(
+            photo=image_bytes,
+            caption=f"✨ <i>{_safe_html(prompt[:200])}</i>",
+            parse_mode=ParseMode.HTML,
+        )
+
+        logger.info("Image generated for chat %s: %s", chat_id, prompt[:80])
+
+    except Exception as e:
+        logger.exception("Image generation failed for chat %s: %s", chat_id, e)
+        await update.message.reply_text(
+            f"❌ Image generation failed: {_safe_html(str(e)[:200])}",
+            parse_mode=ParseMode.HTML,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Notes / Reminders
+# ---------------------------------------------------------------------------
+async def note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Save a note or reminder."""
+    chat_id = update.effective_chat.id
+    text = " ".join(context.args) if context.args else ""
+
+    if not text:
+        await update.message.reply_text(
+            "Usage: <code>/note &lt;something to remember&gt;</code>\n"
+            "Example: <code>/note buy groceries tomorrow</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # Extract a title from the first few words
+    title = text[:50] if len(text) > 50 else text
+    note_id = memory.add_note(chat_id, text, title)
+
+    conv = memory.get_or_create(chat_id)
+    conv.add_message("user", f"[Saved note] {text}")
+    conv.add_message("assistant", f"[Note saved with ID {note_id}]")
+
+    await update.message.reply_text(
+        f"📝 <b>Note saved!</b> (ID: {note_id})\n\n{_safe_html(text[:300])}",
+        parse_mode=ParseMode.HTML,
+    )
+    logger.info("Note %d saved for chat %s", note_id, chat_id)
+
+
+async def list_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """List all active notes for this chat."""
+    chat_id = update.effective_chat.id
+    notes = memory.get_notes(chat_id)
+
+    if not notes:
+        await update.message.reply_text(
+            "📭 No notes yet. Use <code>/note &lt;text&gt;</code> to save one.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    lines = ["<b>📋 Your Notes</b>\n"]
+    for n in notes:
+        title = _safe_html(n["title"][:60])
+        short = _safe_html(n["content"][:100])
+        lines.append(
+            f"<b>#{n['id']}</b> {title}\n"
+            f"{short}…\n"
+            f"<i>{time.strftime('%b %d, %H:%M', time.localtime(n['created_at']))}</i>\n"
+        )
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Mark a note as completed."""
+    chat_id = update.effective_chat.id
+    args = context.args
+
+    if not args:
+        await update.message.reply_text(
+            "Usage: <code>/done &lt;note_id&gt;</code>\n"
+            "Use <code>/notes</code> to find the ID.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    try:
+        note_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text(
+            "Please provide a valid note ID (a number).",
+        )
+        return
+
+    if memory.mark_note_done(note_id):
+        await update.message.reply_text(
+            f"✅ <b>Note #{note_id}</b> marked as done!",
+            parse_mode=ParseMode.HTML,
+        )
+        logger.info("Note %d completed for chat %s", note_id, chat_id)
+    else:
+        await update.message.reply_text(
+            f"Couldn't find note #{note_id}. Use <code>/notes</code> to see your notes.",
+            parse_mode=ParseMode.HTML,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Web search command
 # ---------------------------------------------------------------------------
 async def web_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -227,8 +365,7 @@ async def web_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"[Web search results for: {query}]\n\n{formatted}",
         )
 
-        # Build result list, keeping total under 4096 chars to avoid Telegram's limit
-        MAX_MSG_LEN = 3800  # leave room for HTML tags and framing
+        MAX_MSG_LEN = 3800
         text = f"📄 <b>Results for:</b> {_safe_html(query)}\n\n"
         if not results:
             text += "No results found. Try a different search."
@@ -247,7 +384,6 @@ async def web_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 text += entry
 
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-
         logger.info("Web search for chat %s: %s | %d results", chat_id, query, len(results))
 
     except Exception as e:
@@ -256,6 +392,96 @@ async def web_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"❌ Search failed: {_safe_html(str(e)[:200])}",
             parse_mode=ParseMode.HTML,
         )
+
+
+# ---------------------------------------------------------------------------
+# Group chat support
+# ---------------------------------------------------------------------------
+async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle messages in groups — respond when the bot is mentioned or replied to."""
+    chat = update.effective_chat
+    if chat.type not in ("group", "supergroup"):
+        return  # Not a group — handled by handle_message instead
+
+    message = update.message
+    if not message or not message.text:
+        return
+
+    bot_username = (await context.bot.get_me()).username
+    user_text = message.text.strip()
+
+    # Check if bot is mentioned or the message is a reply to the bot
+    bot_mentioned = (
+        f"@{bot_username}" in user_text
+        or f"@{bot_username.lower()}" in user_text.lower()
+    )
+    is_reply_to_bot = (
+        message.reply_to_message
+        and message.reply_to_message.from_user
+        and message.reply_to_message.from_user.is_bot
+    )
+
+    if not bot_mentioned and not is_reply_to_bot:
+        return  # Not talking to us
+
+    # Strip the @mention from the text for cleaner history
+    clean_text = user_text
+    if bot_mentioned:
+        clean_text = user_text.replace(f"@{bot_username}", "").strip()
+        clean_text = clean_text.replace(f"@{bot_username.lower()}", "").strip()
+        clean_text = clean_text.replace(bot_username, "").strip()
+
+    if not clean_text:
+        clean_text = user_text
+
+    # Rate limit
+    wait = _check_rate_limit(chat.id)
+    if wait:
+        logger.debug("Rate-limited group chat %s for %.1fs", chat.id, wait)
+        return
+
+    conv = memory.get_or_create(chat.id)
+    conv.add_message("user", clean_text)
+
+    typing_task = await _typing_indicator(chat.id, context.application)
+    typing_task_started = typing_task is not None
+
+    try:
+        response_text, input_tokens, output_tokens = await asyncio.to_thread(
+            send_message_with_search_check, conv
+        )
+
+        if response_text.startswith("SEARCH:"):
+            query = response_text[7:].strip()
+            logger.info("AI requested web search for group chat %s: %s", chat.id, query)
+            results = await search_web(query)
+            formatted = format_search_results(results, query)
+            response_text, in_tok2, out_tok2 = await asyncio.to_thread(
+                send_message_with_search_check, conv, formatted
+            )
+            input_tokens += in_tok2
+            output_tokens += out_tok2
+
+        conv.add_tokens(input_tokens, output_tokens)
+        conv.add_message("assistant", response_text)
+        await _send_long_message(update, response_text, chat.id)
+
+        logger.info("Group %s | responded | %d tokens", chat.id, conv.total_tokens)
+
+    except Exception as e:
+        logger.exception("Error in group chat %s: %s", chat.id, e)
+        err = str(e)
+        try:
+            await update.message.reply_text(
+                f"❌ {_safe_html(err[:400])}",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
+
+    finally:
+        if typing_task_started:
+            typing_task.cancel()
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -282,8 +508,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 # ---------------------------------------------------------------------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Process a user text message — auto-searches the web when the AI needs current info."""
+    """Process a user text message in DMs."""
     chat_id = update.effective_chat.id
+
+    # Skip group messages here — handled by handle_group_message
+    chat = update.effective_chat
+    if chat.type in ("group", "supergroup"):
+        return
+
     user_text = update.message.text.strip()
 
     if not user_text:
@@ -383,8 +615,26 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("web", web_search))
     app.add_handler(CommandHandler("search", web_search))
 
-    # Message handler (text only)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    # Image generation
+    app.add_handler(CommandHandler("draw", draw))
+    app.add_handler(CommandHandler("generate", draw))
+
+    # Notes / reminders
+    app.add_handler(CommandHandler("note", note))
+    app.add_handler(CommandHandler("notes", list_notes))
+    app.add_handler(CommandHandler("done", done))
+
+    # Group chat handler (must be before the general message handler)
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
+        handle_group_message,
+    ))
+
+    # Message handler (text only, DMs)
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & ~filters.ChatType.GROUPS,
+        handle_message,
+    ))
 
     # Photo handler (acknowledges images — no vision support)
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
