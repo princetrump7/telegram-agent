@@ -90,12 +90,12 @@ def main() -> None:
     if not config.is_configured:
         sys.exit(1)
 
-    print("=" * 45)
-    print("  Telegram AI Agent")
-    print("  Powered by OpenCode Zen")
+    print("=" * 50)
+    print("  ✦ Telegram AI Agent")
+    print("  Your AI agent, inside your messenger")
     if config.WEBAPP_URL:
-        print(f"  Web App: {config.WEBAPP_URL}")
-    print("=" * 45)
+        print(f"  🌐 {config.WEBAPP_URL}")
+    print("=" * 50)
     print()
 
     if config.is_webhook_mode:

@@ -305,10 +305,9 @@ def error_card(error_text: str) -> str:
     """Formatted error message."""
     return (
         "━━ <b>✦ Oops ✦</b> ━━\n\n"
-        f"😅 <b>Something went wrong.</b>\n\n"
-        f"{safe(error_text[:300])}\n\n"
+        f"😅 {safe(error_text[:300])}\n\n"
         "━━━━━━━━━━━━━━━━━━━\n\n"
-        "Try again in a moment. If it keeps happening, use <code>/new</code> to reset."
+        "Try again in a moment. Use <code>/new</code> to reset."
     )
 
 
