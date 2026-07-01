@@ -122,47 +122,91 @@ def _call_api(client: OpenAI, messages: list[dict], model: str, max_tokens: int,
     return response_text, input_tokens, output_tokens, finish_reason
 
 
+def _build_messages(conversation: Conversation, extra_system: str | None = None) -> list[dict]:
+    """Build the message list for the API call from conversation history."""
+    messages: list[dict] = []
+
+    brain_context = _load_brain_context()
+    if brain_context:
+        messages.append({"role": "system", "content": brain_context})
+
+    messages.append({"role": "system", "content": config.SYSTEM_PROMPT})
+
+    if extra_system:
+        messages.append({"role": "system", "content": extra_system})
+
+    for msg in conversation.get_history():
+        messages.append({"role": msg["role"], "content": msg["content"]})
+
+    return messages
+
+
 def send_message(conversation: Conversation) -> Tuple[str, int, int]:
     """
     Send the conversation to the AI API and return (response_text, input_tokens, output_tokens).
     Includes retry logic with fallback models when the primary model returns empty responses.
 
     Raises:
-        RateLimitError: on quota/rate limits (after retries)
-        AuthenticationError: on bad API key
-        APIError: on persistent API failures
+        RuntimeError: if all models fail
+    """
+    client = _get_client()
+    messages = _build_messages(conversation)
+    return _call_models_with_retry(client, messages)
+
+
+def send_message_with_search_check(
+    conversation: Conversation,
+    search_results: str | None = None,
+) -> Tuple[str, int, int]:
+    """
+    Two-phase AI call with automatic web search:
+
+    Phase 1 — if no search_results provided:
+      Ask the model if it needs current info. If it responds with
+      'SEARCH: <query>', the caller should do the search and call this
+      function again with search_results set.
+      If it responds normally, that's the final answer.
+
+    Phase 2 — if search_results provided:
+      Feed the search results back to the model and get a final answer
+      informed by those results.
+
+    Returns (response_text, input_tokens, output_tokens).
+    Raises RuntimeError if all models fail.
     """
     client = _get_client()
 
-    # Build OpenAI-format messages
-    messages: list[dict] = []
+    if search_results:
+        # --- Phase 2: we have search results, get final answer ---
+        extra = (
+            "Web search results are provided below. Use them to answer "
+            "the user's question with current, accurate information. "
+            "Cite sources where appropriate."
+        )
+        messages = _build_messages(conversation, extra_system=extra)
+        messages.append({"role": "system", "content": f"Web search results:\n{search_results[:8000]}"})
 
-    # Inject AI Second Brain context if available
-    brain_context = _load_brain_context()
-    if brain_context:
-        messages.append({
-            "role": "system",
-            "content": brain_context,
-        })
+        logger.info("Phase 2 — search results provided, getting final answer")
+        return _call_models_with_retry(client, messages)
 
-    messages.append({
-        "role": "system",
-        "content": config.SYSTEM_PROMPT,
-    })
-    for msg in conversation.get_history():
-        messages.append({
-            "role": msg["role"],
-            "content": msg["content"],
-        })
-
-    logger.info(
-        "Sending to API | model=%s | messages=%d | max_tokens=%d",
-        config.AI_MODEL,
-        len(messages),
-        config.MAX_TOKENS,
+    # --- Phase 1: ask if search is needed ---
+    search_instruction = (
+        "You have the ability to search the web for current information. "
+        "If answering this question would benefit from up-to-date information, "
+        "respond with exactly: SEARCH: <your search query>\n"
+        "For example: SEARCH: latest AI news 2026\n\n"
+        "If you can answer from your training data alone, respond normally."
     )
+    messages = _build_messages(conversation, extra_system=search_instruction)
 
-    # --- Attempt multiple models ---
+    logger.info("Phase 1 — checking if web search is needed")
+    response_text, in_tok, out_tok = _call_models_with_retry(client, messages)
+
+    return response_text, in_tok, out_tok
+
+
+def _call_models_with_retry(client: OpenAI, messages: list[dict]) -> Tuple[str, int, int]:
+    """Try multiple models until one returns a non-empty response. Raises RuntimeError if all fail."""
     models_to_try = [
         config.AI_MODEL,
         "google/gemini-2.0-flash-exp:free",
@@ -170,7 +214,6 @@ def send_message(conversation: Conversation) -> Tuple[str, int, int]:
         "llama-3-2-3b-it-free",
     ]
 
-    # Deduplicate in case primary matches a fallback
     seen_models = set()
     unique_models = []
     for m in models_to_try:
@@ -184,42 +227,34 @@ def send_message(conversation: Conversation) -> Tuple[str, int, int]:
             response_text, in_tok, out_tok, finish_reason = _call_api(
                 client, messages, model, config.MAX_TOKENS, attempt_idx
             )
-
             if response_text:
                 return response_text, in_tok, out_tok
 
-            # Empty response — log details
             logger.warning(
                 "Model %s returned empty content (finish_reason=%s). %s",
                 model, finish_reason,
-                "Trying fallback model." if attempt_idx < len(unique_models) else "All models tried.",
+                "Trying fallback." if attempt_idx < len(unique_models) else "All models tried.",
             )
             last_error = f"Model returned empty (finish_reason={finish_reason})"
 
         except RateLimitError as e:
             logger.warning("Rate limited on %s: %s", model, e)
             last_error = f"Rate limited: {e}"
-            # Rate limits are transient — wait briefly then try next model
             time.sleep(2)
             continue
-
         except AuthenticationError as e:
-            logger.error("Auth error on %s (bad API key or model): %s", model, e)
-            # Don't retry with wrong auth — but still try fallback models
+            logger.error("Auth error on %s: %s", model, e)
             last_error = f"Auth error: {e}"
             continue
-
         except APIError as e:
             logger.warning("API error on %s: %s", model, e)
             last_error = f"API error: {e}"
             continue
-
         except Exception as e:
             logger.exception("Unexpected error on %s: %s", model, e)
             last_error = f"{type(e).__name__}: {e}"
             continue
 
-    # All models failed
     error_msg = (
         "😅 Looks like the AI model I'm using is having trouble right now. "
         "This usually happens when the free model is overloaded or rate-limited.\n\n"

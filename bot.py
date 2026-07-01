@@ -16,7 +16,7 @@ from telegram.ext import (
     filters,
 )
 
-from ai_client import send_message as ai_send
+from ai_client import send_message as ai_send, send_message_with_search_check
 from config import config
 from memory import memory
 from search_client import format_search_results, search_web
@@ -282,7 +282,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 # ---------------------------------------------------------------------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Process a user text message through Claude."""
+    """Process a user text message — auto-searches the web when the AI needs current info."""
     chat_id = update.effective_chat.id
     user_text = update.message.text.strip()
 
@@ -306,10 +306,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     typing_task_started = typing_task is not None
 
     try:
-        # Call AI API
+        # Phase 1: Ask the AI if it needs web search
         response_text, input_tokens, output_tokens = await asyncio.to_thread(
-            ai_send, conv
+            send_message_with_search_check, conv
         )
+
+        # Check if AI requested a web search
+        if response_text.startswith("SEARCH:"):
+            query = response_text[7:].strip()
+            logger.info("AI requested web search for chat %s: %s", chat_id, query)
+
+            # Notify user
+            await update.message.reply_text(
+                f"🔍 Searching for current info...",
+            )
+
+            # Phase 2: Do the search
+            results = await search_web(query)
+            formatted = format_search_results(results, query)
+
+            # Phase 3: Get AI answer with search context
+            response_text, in_tok2, out_tok2 = await asyncio.to_thread(
+                send_message_with_search_check, conv, formatted
+            )
+            input_tokens += in_tok2
+            output_tokens += out_tok2
 
         # Update token tracking
         conv.add_tokens(input_tokens, output_tokens)
