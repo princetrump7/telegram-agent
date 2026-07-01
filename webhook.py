@@ -1,10 +1,10 @@
-"""FastAPI webhook server for production deployments."""
+"""FastAPI webhook server — serves bot + web app in production."""
 
 import logging
 
 import uvicorn
 from fastapi import FastAPI, Request
-from telegram import Update
+from telegram import BotCommand, Update
 
 from bot import build_application
 from config import config
@@ -16,10 +16,9 @@ _application = build_application()
 
 
 async def _init_webhook() -> None:
-    """Start the PTB application and register the webhook."""
-    from telegram import BotCommand
-
+    """Start the PTB application, register webhook + commands."""
     await _application.initialize()
+
     webhook_url = config.resolved_webhook_url.rstrip("/") + "/webhook"
     await _application.bot.set_webhook(url=webhook_url)
 
@@ -45,13 +44,19 @@ async def _init_webhook() -> None:
         logger.warning("Could not register bot commands: %s", e)
 
     await _application.start()
+    logger.info("Webhook registered: %s", webhook_url)
 
 
+# FastAPI app with webhook + web app routes
 app = FastAPI(
     title="Telegram AI Agent",
-    description="Claude-powered Telegram assistant",
-    version="1.0.0",
+    description="Personal AI agent with web app dashboard",
+    version="1.1.0",
 )
+
+# Mount the web app routes
+from webapp import router as webapp_router
+app.include_router(webapp_router, prefix="/app")
 
 
 @app.on_event("startup")
@@ -89,6 +94,13 @@ async def health() -> dict:
     }
 
 
+@app.get("/")
+async def root():
+    """Root redirects to web app."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/app")
+
+
 @app.get("/debug-search")
 async def debug_search(q: str = "latest AI news") -> dict:
     """Test search backends (diagnostic)."""
@@ -107,7 +119,7 @@ async def debug_search(q: str = "latest AI news") -> dict:
 def run() -> None:
     """Run the FastAPI webhook server."""
     logger.info(
-        "Starting webhook server on %s:%s",
+        "Starting server on %s:%s",
         config.WEBHOOK_HOST,
         config.WEBHOOK_PORT,
     )

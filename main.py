@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import sys
+import threading
 
 # Fix for Windows event loop in Python 3.12+
 if sys.platform == "win32":
@@ -19,11 +20,13 @@ logging.basicConfig(
 # Quiet noisy libraries
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("uvicorn").setLevel(logging.WARNING)
+logging.getLogger("fastapi").setLevel(logging.WARNING)
 
 logger = logging.getLogger("main")
 
 
-async def setup_commands(app: Application) -> None:
+async def setup_commands(app) -> None:
     """Register the bot command menu with Telegram."""
     from telegram import BotCommand
 
@@ -48,22 +51,35 @@ async def setup_commands(app: Application) -> None:
         logger.warning("Could not register bot commands: %s", e)
 
 
+def start_webapp() -> None:
+    """Start the web app server in a background thread (dev mode)."""
+    from webapp import run_webapp
+
+    logger.info("Web App server starting on http://%s:%s/app", config.WEBAPP_HOST, config.WEBAPP_PORT)
+    t = threading.Thread(target=run_webapp, daemon=True)
+    t.start()
+    return t
+
+
 def run_polling() -> None:
-    """Run in development mode with long-polling."""
+    """Run in development mode with long-polling + web app."""
     from bot import build_application
 
     logger.info("Starting in POLLING mode (development)")
+
+    # Start the web app server in background
+    if config.WEBAPP_URL:
+        start_webapp()
+    else:
+        logger.info("Web App disabled (set WEBAPP_URL to enable)")
+
     app = build_application()
-
-    # Register commands on startup
     app.post_init = setup_commands
-
-    # run_polling() handles its own event loop
     app.run_polling(allowed_updates=["messages"])
 
 
 def run_webhook() -> None:
-    """Run in production mode with FastAPI + webhook."""
+    """Run in production mode with FastAPI + webhook + web app."""
     from webhook import run
 
     logger.info("Starting in WEBHOOK mode (production)")
@@ -77,6 +93,8 @@ def main() -> None:
     print("=" * 45)
     print("  Telegram AI Agent")
     print("  Powered by OpenCode Zen")
+    if config.WEBAPP_URL:
+        print(f"  Web App: {config.WEBAPP_URL}")
     print("=" * 45)
     print()
 

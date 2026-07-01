@@ -76,6 +76,11 @@ class Config:
     IMAGE_WIDTH: int = int(os.getenv("IMAGE_WIDTH", "1024"))
     IMAGE_HEIGHT: int = int(os.getenv("IMAGE_HEIGHT", "1024"))
 
+    # --- Web App (Telegram Web App) ---
+    WEBAPP_URL: str = os.getenv("WEBAPP_URL", "")
+    WEBAPP_PORT: int = int(os.getenv("WEBAPP_PORT", "8081"))
+    WEBAPP_HOST: str = os.getenv("WEBAPP_HOST", "127.0.0.1")
+
     # --- Logging ---
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
 
