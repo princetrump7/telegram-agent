@@ -17,10 +17,33 @@ _application = build_application()
 
 async def _init_webhook() -> None:
     """Start the PTB application and register the webhook."""
+    from telegram import BotCommand
+
     await _application.initialize()
     webhook_url = config.resolved_webhook_url.rstrip("/") + "/webhook"
     await _application.bot.set_webhook(url=webhook_url)
-    logger.info("Webhook registered: %s", webhook_url)
+
+    # Register bot command menu
+    commands = [
+        BotCommand("start", "Welcome & main menu"),
+        BotCommand("help", "Show all commands"),
+        BotCommand("draw", "Generate an AI image"),
+        BotCommand("generate", "Same as /draw"),
+        BotCommand("note", "Save a note or reminder"),
+        BotCommand("notes", "List your notes"),
+        BotCommand("done", "Mark a note complete"),
+        BotCommand("web", "Search the web"),
+        BotCommand("search", "Same as /web"),
+        BotCommand("new", "Start a fresh conversation"),
+        BotCommand("clear", "Wipe conversation history"),
+        BotCommand("stats", "Show token usage"),
+    ]
+    try:
+        await _application.bot.set_my_commands(commands)
+        logger.info("Bot commands registered (%d)", len(commands))
+    except Exception as e:
+        logger.warning("Could not register bot commands: %s", e)
+
     await _application.start()
 
 

@@ -23,12 +23,40 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("main")
 
 
+async def setup_commands(app: Application) -> None:
+    """Register the bot command menu with Telegram."""
+    from telegram import BotCommand
+
+    commands = [
+        BotCommand("start", "Welcome & main menu"),
+        BotCommand("help", "Show all commands"),
+        BotCommand("draw", "Generate an AI image"),
+        BotCommand("generate", "Same as /draw"),
+        BotCommand("note", "Save a note or reminder"),
+        BotCommand("notes", "List your notes"),
+        BotCommand("done", "Mark a note complete"),
+        BotCommand("web", "Search the web"),
+        BotCommand("search", "Same as /web"),
+        BotCommand("new", "Start a fresh conversation"),
+        BotCommand("clear", "Wipe conversation history"),
+        BotCommand("stats", "Show token usage"),
+    ]
+    try:
+        await app.bot.set_my_commands(commands)
+        logger.info("Bot commands registered (%d)", len(commands))
+    except Exception as e:
+        logger.warning("Could not register bot commands: %s", e)
+
+
 def run_polling() -> None:
     """Run in development mode with long-polling."""
     from bot import build_application
 
     logger.info("Starting in POLLING mode (development)")
     app = build_application()
+
+    # Register commands on startup
+    app.post_init = setup_commands
 
     # run_polling() handles its own event loop
     app.run_polling(allowed_updates=["messages"])
