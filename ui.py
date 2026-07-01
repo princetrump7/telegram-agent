@@ -142,21 +142,21 @@ def welcome_card() -> str:
     """Rich welcome message — Mira-inspired."""
     webapp_line = ""
     if _webapp_url():
-        webapp_line = "\n🌐 <b>Web App</b> — Full dashboard & gallery\n"
+        webapp_line = "\n🌐 <b>Dashboard</b> — Full stats & gallery"
 
     return (
-        "✦ <b>Your AI Agent is live.</b>\n\n"
-        "I turn conversations into action. Memory, images, search, notes — "
-        "all inside Telegram.\n\n"
+        "✦ <b>Your AI agent is live.</b>\n\n"
+        "I turn conversations into action — right inside your messenger. "
+        "Memory, images, notes, search. Zero setup.\n\n"
         "━━━━━━━━━━━━━━━━━━━\n\n"
         "🧠 <b>Memory</b> — I remember everything across chats\n"
         "🎨 <b>Content Studio</b> — /draw generates images\n"
-        "📝 <b>Notes</b> — Save reminders, I'll track them\n"
+        "📝 <b>Notes</b> — Save & track reminders\n"
         "🔍 <b>Search</b> — Current info, automatically\n"
         "👥 <b>Groups</b> — @mention me anywhere"
         + webapp_line +
-        "\n━━━━━━━━━━━━━━━━━━━\n\n"
-        "Ready when you are. Say what you need 💬"
+        "\n\n━━━━━━━━━━━━━━━━━━━\n\n"
+        "Ready when you are 💬"
     )
 
 
@@ -164,24 +164,24 @@ def help_card() -> str:
     """Structured help with categories."""
     webapp_line = ""
     if _webapp_url():
-        webapp_line = "🌐 <code>/app</code> — Open the web app dashboard\n"
+        webapp_line = "🌐 <code>/app</code> — Open dashboard\n"
 
     return (
         "━━ <b>✦ Commands ✦</b> ━━\n\n"
-        "━━ <b>🎨 CONTENT STUDIO</b> ━━\n"
+        "<b>🎨 CONTENT STUDIO</b>\n"
         "🎨 <code>/draw &lt;prompt&gt;</code> — Generate an image\n"
-        "⚡ <code>/generate &lt;prompt&gt;</code> — Same as /draw\n\n"
-        "━━ <b>📝 NOTES</b> ━━\n"
+        "⚡ <code>/generate &lt;prompt&gt;</code> — Same\n\n"
+        "<b>📝 NOTES</b>\n"
         "📝 <code>/note &lt;text&gt;</code> — Save a note\n"
-        "📋 <code>/notes</code> — List your notes\n"
-        "✅ <code>/done &lt;id&gt;</code> — Mark note complete\n\n"
-        "━━ <b>🔍 SEARCH</b> ━━\n"
+        "📋 <code>/notes</code> — List all\n"
+        "✅ <code>/done &lt;id&gt;</code> — Mark complete\n\n"
+        "<b>🔍 SEARCH</b>\n"
         "🔍 <code>/web &lt;query&gt;</code> — Search the web\n"
-        "🌐 <code>/search &lt;query&gt;</code> — Same as /web\n\n"
-        "━━ <b>💬 CHAT</b> ━━\n"
+        "🌐 <code>/search &lt;query&gt;</code> — Same\n\n"
+        "<b>💬 CHAT</b>\n"
         "🆕 <code>/new</code> — Fresh conversation\n"
         "🗑 <code>/clear</code> — Wipe history\n"
-        "📊 <code>/stats</code> — Token usage & activity\n"
+        "📊 <code>/stats</code> — Usage & activity\n"
         "❓ <code>/help</code> — This message\n"
         + webapp_line +
         "\n━━━━━━━━━━━━━━━━━━━\n\n"
