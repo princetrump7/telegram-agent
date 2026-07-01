@@ -81,6 +81,15 @@ class Config:
     WEBAPP_PORT: int = int(os.getenv("WEBAPP_PORT", "8081"))
     WEBAPP_HOST: str = os.getenv("WEBAPP_HOST", "127.0.0.1")
 
+    @property
+    def resolved_webapp_url(self) -> str:
+        """Return the effective web app URL, auto-detecting from Render if needed."""
+        if self.WEBAPP_URL:
+            return self.WEBAPP_URL
+        if self.RENDER_EXTERNAL_URL:
+            return f"{self.RENDER_EXTERNAL_URL}/app"
+        return ""
+
     # --- Logging ---
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
 

@@ -16,8 +16,9 @@ def safe(text: str) -> str:
 
 
 def _webapp_url() -> Optional[str]:
-    """Return the configured web app URL, or None."""
-    return config.WEBAPP_URL or None
+    """Return the configured web app URL, or None.
+    Auto-detects from RENDER_EXTERNAL_URL in production."""
+    return config.resolved_webapp_url or None
 
 
 # ---------------------------------------------------------------------------
