@@ -20,5 +20,9 @@ services:
           type: web
           name: telegram-agent
           property: host
+      - key: WEBAPP_URL
+        value: https://telegram-agent.onrender.com/app
+      - key: WEBHOOK_URL
+        value: https://telegram-agent.onrender.com
       - key: LOG_LEVEL
         value: INFO
