@@ -1,6 +1,6 @@
 # 🤖 Telegram AI Agent
 
-A **Claude-powered** AI chat companion for Telegram. Conversational, context-aware, and deployable in minutes.
+An **AI-powered** chat companion for Telegram. Runs on OpenCode Zen (free models) or any OpenAI-compatible API. Conversational, context-aware, and deployable in minutes.
 
 ## Quick Start
 
@@ -8,7 +8,7 @@ A **Claude-powered** AI chat companion for Telegram. Conversational, context-awa
 
 - Python 3.11+
 - A [Telegram bot token](https://t.me/BotFather) from @BotFather
-- An [Anthropic API key](https://console.anthropic.com/)
+- An API key — get one free at [opencode.ai](https://opencode.ai)
 
 ### 2. Setup
 
@@ -20,7 +20,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` and fill in your `TELEGRAM_BOT_TOKEN` and `ANTHROPIC_API_KEY`.
+Edit `.env` and fill in your `TELEGRAM_BOT_TOKEN` and `OPENCODE_API_KEY`.
 
 ### 3. Run (development)
 
@@ -32,18 +32,12 @@ Message your bot on Telegram. It responds in polling mode — no public URL need
 
 ### 4. Deploy (production)
 
-**Option A — Render.com**
+**Option A — Render.com (via render.yaml)**
 
 1. Push this repo to GitHub
 2. On Render, create a **New Web Service** (not static site)
-3. Connect your repo
-4. Settings:
-   - **Runtime:** Docker
-   - **Port:** 8080
-   - **Environment variables:**
-     - `TELEGRAM_BOT_TOKEN` ← your token
-     - `ANTHROPIC_API_KEY` ← your key
-     - `WEBHOOK_URL` ← `https://your-app.onrender.com`
+3. Connect your repo — `render.yaml` is auto-detected
+4. Set `TELEGRAM_BOT_TOKEN` and `OPENCODE_API_KEY` as secret env vars
 5. Deploy
 
 **Option B — Railway.app**
@@ -68,7 +62,7 @@ Message your bot on Telegram. It responds in polling mode — no public URL need
 ```
 Telegram → Webhook/Polling → Bot Handlers
   → Conversation Memory (per-user)
-  → Claude API (Anthropic)
+  → AI API (OpenCode Zen / OpenRouter / any OpenAI-compatible)
   → Response back to Telegram
 ```
 
@@ -82,8 +76,9 @@ Telegram → Webhook/Polling → Bot Handlers
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | ✅ | — | From @BotFather |
-| `ANTHROPIC_API_KEY` | ✅ | — | From console.anthropic.com |
-| `CLAUDE_MODEL` | ❌ | `claude-sonnet-4-20250514` | Model ID |
+| `OPENCODE_API_KEY` | ✅ | — | From opencode.ai (free) |
+| `OPENCODE_BASE_URL` | ❌ | `https://opencode.ai/zen/v1` | OpenAI-compatible API endpoint |
+| `AI_MODEL` | ❌ | `deepseek-v4-flash-free` | Model ID (falls back through 4 models on empty response) |
 | `MAX_TOKENS` | ❌ | `1024` | Max response tokens |
 | `MEMORY_SIZE` | ❌ | `20` | Message pairs to remember |
 | `WEBHOOK_URL` | ❌ | — | Set for production deployment |

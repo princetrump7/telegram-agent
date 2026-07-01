@@ -4,8 +4,7 @@ import asyncio
 import html as html_module
 import logging
 import time
-from pathlib import Path
-from typing import Awaitable, Callable, TypeVar
+from typing import TypeVar
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -19,13 +18,7 @@ from telegram.ext import (
 
 from ai_client import send_message as ai_send
 from config import config
-from file_handler import (
-    clean_temp_file,
-    download_file,
-    extract_text_from_file,
-    get_file_description,
-)
-from memory import Conversation, memory
+from memory import memory
 from search_client import format_search_results, search_web
 
 logger = logging.getLogger(__name__)
@@ -131,9 +124,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "• <code>/stats</code> — show token usage\n"
         "• <code>/new</code> — start a fresh conversation\n"
         "• <code>/web &lt;query&gt;</code> — search the web\n\n"
-        "<b>New features:</b>\n"
-        "📎 Send me a PDF or text file — I'll read and analyze it\n"
-        "🌐 Use <code>/web</code> to get current info from the internet\n\n"
         f"<i>Conversation history: {conv.message_count} messages so far</i>"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
@@ -152,7 +142,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "🔹 <code>/search &lt;query&gt;</code> — Same as /web\n\n"
         "<b>Tips:</b>\n"
         "• I remember our conversation and refer back to it\n"
-        "• You can send me PDFs, text files, code — I'll read and analyze them\n"
         "• Use <code>/clear</code> or <code>/new</code> to reset my memory\n"
         "• Use <code>/web</code> to get current information from the internet\n"
         "• Long responses are split into multiple messages automatically"
@@ -269,93 +258,6 @@ async def web_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
 
 
-# ---------------------------------------------------------------------------
-# File / document handlers
-# ---------------------------------------------------------------------------
-async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Process a document file (PDF, TXT, etc.)."""
-    chat_id = update.effective_chat.id
-    document = update.message.document
-
-    desc = get_file_description(document)
-    await update.message.reply_text(
-        f"📎 Received: <i>{_safe_html(desc)}</i>\n⏳ Processing...",
-        parse_mode=ParseMode.HTML,
-    )
-
-    local_path = await download_file(
-        context.application.bot,
-        await document.get_file(),
-        suffix=Path(document.file_name or "file").suffix or ".tmp",
-    )
-
-    if not local_path:
-        await update.message.reply_text("❌ Could not download file (too large or error).")
-        return
-
-    try:
-        text = extract_text_from_file(local_path)
-
-        if not text:
-            await update.message.reply_text(
-                "📄 File received. I can only analyze text-based files "
-                "(.txt, .pdf, .csv, .json, .py, etc.).",
-            )
-            return
-
-        MAX_CHARS = 10000
-        if len(text) > MAX_CHARS:
-            text = text[:MAX_CHARS] + "\n\n[...content truncated at 10,000 chars]"
-
-        conv = memory.get_or_create(chat_id)
-
-        # Build a clear prompt for the model
-        file_ext = Path(document.file_name or "file").suffix.lower() if document.file_name else ""
-        if file_ext in (".pdf", ".txt", ".md"):
-            file_type_prompt = "Read this document and provide a clear summary of its contents. Highlight the key points, main topics, and important details."
-        elif file_ext in (".csv", ".json", ".xml", ".yaml", ".yml"):
-            file_type_prompt = "Read this data file and summarize its structure and contents. Describe what data it contains, the schema/structure, and any notable patterns."
-        elif file_ext in (".py", ".js", ".ts", ".html", ".css"):
-            file_type_prompt = "Read this code file and provide a brief analysis: what it does, its structure, and any notable patterns or potential issues."
-        else:
-            file_type_prompt = "Read this file and provide a clear summary of its contents."
-
-        conv.add_message(
-            "user",
-            f"File received: {document.file_name or 'unnamed'}\n\n"
-            f"File content:\n```\n{text}\n```\n\n{file_type_prompt}",
-        )
-
-        # Start typing indicator
-        typing_task = await _typing_indicator(chat_id, context.application)
-
-        try:
-            response_text, in_tok, out_tok = await asyncio.to_thread(ai_send, conv)
-            conv.add_tokens(in_tok, out_tok)
-            conv.add_message("assistant", response_text)
-            await _send_long_message(update, response_text, chat_id)
-
-            logger.info(
-                "File chat %s | %s | %d+%d tokens",
-                chat_id,
-                document.file_name,
-                in_tok,
-                out_tok,
-            )
-        finally:
-            if typing_task:
-                typing_task.cancel()
-
-    except Exception as e:
-        logger.exception("File processing error for chat %s: %s", chat_id, e)
-        await update.message.reply_text(
-            "❌ Error processing file. Please try again.",
-            parse_mode=ParseMode.HTML,
-        )
-    finally:
-        clean_temp_file(local_path)
-
-
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Acknowledge a photo message (vision analysis not available with current model)."""
     chat_id = update.effective_chat.id
@@ -376,6 +278,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "📷 Photo received! Unfortunately, the current AI model can't analyze images. "
         "Describe what's in it and I'll help.",
     )
+
+
 # ---------------------------------------------------------------------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Process a user text message through Claude."""
@@ -426,10 +330,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     except Exception as e:
         logger.exception("Error processing message for chat %s: %s", chat_id, e)
+        err = str(e)
         await update.message.reply_text(
-            "🤖 <b>Oops, something went wrong.</b>\n\n"
-            f"<code>{_safe_html(str(e)[:200])}</code>\n\n"
-            "Please try again in a moment. If this keeps happening, check your API key and connection.",
+            f"❌ <b>Something went wrong.</b>\n\n{_safe_html(err[:400])}",
             parse_mode=ParseMode.HTML,
         )
 
@@ -462,8 +365,7 @@ def build_application() -> Application:
     # Message handler (text only)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # File / document handlers
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    # Photo handler (acknowledges images — no vision support)
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     # Error handler

@@ -29,6 +29,15 @@ class Config:
     # --- Conversation memory ---
     MEMORY_SIZE: int = int(os.getenv("MEMORY_SIZE", "20"))
 
+    # --- AI Second Brain ---
+    SECOND_BRAIN_PATH: str = os.getenv(
+        "SECOND_BRAIN_PATH",
+        str(Path.home() / "AI-Second-Brain"),
+    )
+    SECOND_BRAIN_ENABLED: bool = _bool(
+        os.getenv("SECOND_BRAIN_ENABLED", "true")
+    )
+
     # --- System prompt ---
     SYSTEM_PROMPT: str = os.getenv(
         "SYSTEM_PROMPT",
